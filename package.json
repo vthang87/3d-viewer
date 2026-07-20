@@ -7,7 +7,6 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node scripts/copy-occt-assets.js",
     "copy-occt": "node scripts/copy-occt-assets.js"
   },
   "dependencies": {
