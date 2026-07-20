@@ -1,0 +1,11 @@
+services:
+  app:
+    image: ghcr.io/vthang87/3d-viewer:latest
+    container_name: 3d-viewer
+    restart: unless-stopped
+    ports:
+      - "3007:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"

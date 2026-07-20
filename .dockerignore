@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.gitignore
+*.md
+docs
+.DS_Store
+tsconfig.tsbuildinfo
+.env*
+AGENTS.md
+CLAUDE.md
