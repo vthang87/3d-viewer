@@ -1,5 +1,9 @@
 # Web 3D File Viewer — STL / 3MF
 
+> **Trạng thái MVP:** đã triển khai.  
+> Live: [https://3d-viewer.vthang.top](https://3d-viewer.vthang.top) · Portainer stack `3d-viewer` (hp-pc) · image `ghcr.io/vthang87/3d-viewer:latest`  
+> Chi tiết chạy / deploy: xem [README](../README.md).
+
 ## 1. Mục tiêu
 
 Xây dựng một web app cho phép người dùng mở và xem trực tiếp các file 3D phổ biến như:
