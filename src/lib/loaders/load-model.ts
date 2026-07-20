@@ -2,6 +2,7 @@ import { centerObject, getBoundingBox } from "@/lib/geometry/bounding-box";
 import { computeGeometryStats } from "@/lib/geometry/geometry-info";
 import { extractSceneObjects } from "@/lib/geometry/object-tree";
 import { loadSTL } from "@/lib/loaders/stl-loader";
+import { loadSTEP } from "@/lib/loaders/step-loader";
 import { load3MF } from "@/lib/loaders/threemf-loader";
 import {
   ACCEPTED_EXTENSIONS,
@@ -19,6 +20,7 @@ export function detectFileType(filename: string): FileType | null {
   const ext = getExtension(filename);
   if (ext === ".stl") return "stl";
   if (ext === ".3mf") return "3mf";
+  if (ext === ".step" || ext === ".stp") return "step";
   return null;
 }
 
@@ -44,14 +46,22 @@ export async function loadModel(file: File): Promise<LoadedModel> {
 
   let object;
   try {
-    object = type === "stl" ? await loadSTL(buffer) : await load3MF(buffer);
-  } catch {
+    if (type === "stl") {
+      object = await loadSTL(buffer);
+    } else if (type === "3mf") {
+      object = await load3MF(buffer);
+    } else {
+      object = await loadSTEP(buffer);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("STEP")) {
+      throw error;
+    }
     throw new Error(
       "Unable to load this file. The model may be corrupted or unsupported."
     );
   }
 
-  // STL loader already centers geometry; still normalize the group transform.
   const box = getBoundingBox(object);
   if (box.isEmpty()) {
     throw new Error(

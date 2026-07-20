@@ -4,10 +4,18 @@ import { useViewerStore } from "@/store/viewer-store";
 
 export function DimensionsInfo() {
   const dimensions = useViewerStore((state) => state.dimensions);
+  const fileType = useViewerStore((state) => state.fileType);
 
   if (!dimensions) {
     return null;
   }
+
+  const unitNote =
+    fileType === "step"
+      ? "STEP units are converted during tessellation. Dimensions are shown in millimeters (model units as interpreted by the importer)."
+      : fileType === "3mf"
+        ? "3MF may include unit metadata; dimensions are shown in millimeters."
+        : "STL files do not contain unit metadata. Dimensions are interpreted as millimeters.";
 
   return (
     <div className="space-y-2 text-sm">
@@ -36,8 +44,7 @@ export function DimensionsInfo() {
         </div>
       </dl>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        STL files do not contain unit metadata. Dimensions are interpreted as
-        millimeters.
+        {unitNote}
       </p>
     </div>
   );
