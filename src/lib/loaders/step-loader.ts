@@ -12,36 +12,38 @@ export interface StepTessellationParams {
   angularDeflection: number;
 }
 
-interface TransferFace {
-  first: number;
-  last: number;
-  color: [number, number, number] | null;
-}
-
 interface TransferMesh {
   name: string;
   color: [number, number, number] | null;
   position: Float32Array;
   normal: Float32Array | null;
   index: Uint32Array;
-  faces: TransferFace[];
 }
 
 type WorkerResponse =
   | { ok: true; type: "warmup" }
   | {
       ok: true;
+      type: "progress";
+      requestId?: number;
+      phase: string;
+      current?: number;
+      total?: number;
+    }
+  | {
+      ok: true;
       type: "result";
+      requestId?: number;
       success: boolean;
       meshes: TransferMesh[];
     }
-  | { ok: false; error: string };
+  | { ok: false; requestId?: number; error: string };
 
 const WORKER_URL = "/occt-import-js/step-worker.js";
 
 let sharedWorker: Worker | null = null;
 let workerReady: Promise<void> | null = null;
-let requestId = 0;
+let nextRequestId = 1;
 
 function getSharedWorker(): Worker {
   if (!sharedWorker) {
@@ -50,22 +52,53 @@ function getSharedWorker(): Worker {
   return sharedWorker;
 }
 
+function resetWorker(): void {
+  sharedWorker?.terminate();
+  sharedWorker = null;
+  workerReady = null;
+}
+
 /** Preload OCCT WASM so the first STEP open feels faster. */
 export function warmupStepWorker(): void {
   if (typeof window === "undefined") return;
   if (workerReady) return;
 
-  const worker = getSharedWorker();
-  workerReady = new Promise((resolve) => {
-    const onMessage = (event: MessageEvent<WorkerResponse>) => {
-      if (event.data && event.data.ok && event.data.type === "warmup") {
+  try {
+    const worker = getSharedWorker();
+    workerReady = new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error("STEP engine warmup timed out."));
+      }, 45_000);
+
+      const onMessage = (event: MessageEvent<WorkerResponse>) => {
+        if (event.data && event.data.ok && event.data.type === "warmup") {
+          cleanup();
+          resolve();
+        }
+      };
+
+      const onError = () => {
+        cleanup();
+        reject(new Error("STEP engine failed to start."));
+      };
+
+      const cleanup = () => {
+        window.clearTimeout(timeout);
         worker.removeEventListener("message", onMessage);
-        resolve();
-      }
-    };
-    worker.addEventListener("message", onMessage);
-    worker.postMessage({ type: "warmup" });
-  });
+        worker.removeEventListener("error", onError);
+      };
+
+      worker.addEventListener("message", onMessage);
+      worker.addEventListener("error", onError);
+      worker.postMessage({ type: "warmup" });
+    }).catch((error) => {
+      resetWorker();
+      return Promise.reject(error);
+    });
+  } catch {
+    workerReady = null;
+  }
 }
 
 function colorFromRgb(
@@ -76,15 +109,6 @@ function colorFromRgb(
     return fallback.clone();
   }
   return new THREE.Color(rgb[0], rgb[1], rgb[2]);
-}
-
-function createMaterial(color: THREE.Color): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.55,
-    metalness: 0.15,
-    side: THREE.DoubleSide,
-  });
 }
 
 function buildMesh(mesh: TransferMesh): THREE.Mesh {
@@ -99,48 +123,14 @@ function buildMesh(mesh: TransferMesh): THREE.Mesh {
 
   geometry.setIndex(new THREE.BufferAttribute(mesh.index, 1));
 
-  const defaultColor = colorFromRgb(mesh.color, new THREE.Color(DEFAULT_MODEL_COLOR));
-  const materials: THREE.MeshStandardMaterial[] = [createMaterial(defaultColor)];
-  const faces = mesh.faces ?? [];
+  const material = new THREE.MeshStandardMaterial({
+    color: colorFromRgb(mesh.color, new THREE.Color(DEFAULT_MODEL_COLOR)),
+    roughness: 0.55,
+    metalness: 0.15,
+    side: THREE.DoubleSide,
+  });
 
-  if (faces.length > 0) {
-    for (const face of faces) {
-      materials.push(createMaterial(colorFromRgb(face.color, defaultColor)));
-    }
-
-    const triangleCount = mesh.index.length / 3;
-    let triangleIndex = 0;
-    let faceColorGroupIndex = 0;
-
-    while (triangleIndex < triangleCount) {
-      let lastIndex: number;
-      let materialIndex: number;
-
-      if (faceColorGroupIndex >= faces.length) {
-        lastIndex = triangleCount;
-        materialIndex = 0;
-      } else if (triangleIndex < faces[faceColorGroupIndex].first) {
-        lastIndex = faces[faceColorGroupIndex].first;
-        materialIndex = 0;
-      } else {
-        lastIndex = faces[faceColorGroupIndex].last + 1;
-        materialIndex = faceColorGroupIndex + 1;
-        faceColorGroupIndex += 1;
-      }
-
-      geometry.addGroup(
-        triangleIndex * 3,
-        (lastIndex - triangleIndex) * 3,
-        materialIndex
-      );
-      triangleIndex = lastIndex;
-    }
-  }
-
-  const threeMesh = new THREE.Mesh(
-    geometry,
-    materials.length > 1 ? materials : materials[0]
-  );
+  const threeMesh = new THREE.Mesh(geometry, material);
   threeMesh.name = mesh.name?.trim() || "step-part";
   return threeMesh;
 }
@@ -149,9 +139,10 @@ const QUALITY_BASE: Record<
   ImportQuality,
   { linearDeflection: number; angularDeflection: number }
 > = {
-  fast: { linearDeflection: 0.04, angularDeflection: 0.9 },
-  balanced: { linearDeflection: 0.01, angularDeflection: 0.5 },
-  high: { linearDeflection: 0.002, angularDeflection: 0.3 },
+  // Coarser = fewer triangles = much faster STEP imports.
+  fast: { linearDeflection: 0.08, angularDeflection: 1.0 },
+  balanced: { linearDeflection: 0.02, angularDeflection: 0.55 },
+  high: { linearDeflection: 0.004, angularDeflection: 0.35 },
 };
 
 /** Tessellation params from quality + file size (larger files go coarser). */
@@ -163,21 +154,25 @@ export function stepParamsForImport(
   const base = QUALITY_BASE[quality];
   let scale = 1;
 
-  if (mb >= 120) scale = quality === "high" ? 2.5 : 3.5;
-  else if (mb >= 40) scale = quality === "high" ? 1.6 : 2.2;
-  else if (mb >= 15) scale = 1.3;
+  if (mb >= 100) scale = quality === "high" ? 3 : 5;
+  else if (mb >= 40) scale = quality === "high" ? 2 : 3;
+  else if (mb >= 15) scale = 1.5;
 
   return {
     linearUnit: "millimeter",
     linearDeflectionType: "bounding_box_ratio",
     linearDeflection: base.linearDeflection * scale,
-    angularDeflection: Math.min(1.2, base.angularDeflection * Math.sqrt(scale)),
+    angularDeflection: Math.min(1.5, base.angularDeflection * Math.sqrt(scale)),
   };
 }
 
-function timeoutMsForFileSize(byteLength: number): number {
+function timeoutMsForFileSize(byteLength: number, quality: ImportQuality): number {
   const mb = byteLength / (1024 * 1024);
-  return Math.min(15 * 60_000, Math.max(180_000, Math.round(180_000 + mb * 4_000)));
+  const qualityFactor = quality === "fast" ? 0.7 : quality === "high" ? 1.4 : 1;
+  return Math.min(
+    20 * 60_000,
+    Math.max(120_000, Math.round((120_000 + mb * 5_000) * qualityFactor))
+  );
 }
 
 function yieldToMain(): Promise<void> {
@@ -189,26 +184,23 @@ function yieldToMain(): Promise<void> {
 function parseStepInWorker(
   buffer: ArrayBuffer,
   params: StepTessellationParams,
+  quality: ImportQuality,
   onProgress?: LoadProgress
 ): Promise<TransferMesh[]> {
   return new Promise((resolve, reject) => {
     const worker = getSharedWorker();
-    const timeoutMs = timeoutMsForFileSize(buffer.byteLength);
-    const id = ++requestId;
+    const timeoutMs = timeoutMsForFileSize(buffer.byteLength, quality);
+    const requestId = nextRequestId++;
+    const mb = Math.round(buffer.byteLength / (1024 * 1024));
 
-    onProgress?.(
-      `Tessellating STEP (${Math.round(buffer.byteLength / (1024 * 1024))} MB)…`
-    );
+    onProgress?.(`Tessellating STEP (${mb} MB, ${quality})…`);
 
     const timeout = window.setTimeout(() => {
       cleanup();
-      // Recreate worker after timeout — it may be stuck in WASM.
-      sharedWorker?.terminate();
-      sharedWorker = null;
-      workerReady = null;
+      resetWorker();
       reject(
         new Error(
-          "STEP import timed out. Try Import quality → Fast, or export STL/OBJ from CAD."
+          "STEP import timed out. Choose Import quality → Fast and try again, or export binary STL from CAD."
         )
       );
     }, timeoutMs);
@@ -218,17 +210,30 @@ function parseStepInWorker(
       if (!data || typeof data !== "object") return;
       if (data.ok && data.type === "warmup") return;
 
-      // Ignore late messages from a previous request after recreate.
-      if (id !== requestId) return;
+      if ("requestId" in data && data.requestId != null && data.requestId !== requestId) {
+        return;
+      }
+
+      if (data.ok && data.type === "progress") {
+        if (data.phase === "tessellate") {
+          onProgress?.(`Tessellating STEP (${mb} MB, ${quality})…`);
+        } else if (data.phase === "packing") {
+          onProgress?.(
+            `Packing meshes ${data.current ?? 0}/${data.total ?? "?"}…`
+          );
+        }
+        return;
+      }
 
       cleanup();
 
       if (!data.ok) {
+        const err = data.error || "STEP import failed.";
         reject(
           new Error(
-            data.error.includes("memory") || data.error.includes("Memory")
-              ? "Not enough memory to import this STEP file. Use Fast quality or export STL/OBJ."
-              : data.error
+            /memory|alloc|heap/i.test(err)
+              ? "Not enough memory for this STEP file. Use Fast quality, or export binary STL from CAD."
+              : err
           )
         );
         return;
@@ -240,13 +245,11 @@ function parseStepInWorker(
 
     const onError = (event: ErrorEvent) => {
       cleanup();
-      sharedWorker?.terminate();
-      sharedWorker = null;
-      workerReady = null;
+      resetWorker();
       reject(
         new Error(
           event.message ||
-            "STEP worker crashed. The file may be too large for the browser."
+            "STEP worker crashed. Try Fast quality or export STL/OBJ from CAD."
         )
       );
     };
@@ -260,21 +263,24 @@ function parseStepInWorker(
     worker.addEventListener("message", onMessage);
     worker.addEventListener("error", onError);
 
-    const view = new Uint8Array(buffer);
+    // Copy file bytes into a dedicated buffer we can transfer safely.
+    const payload = buffer.slice(0);
+    const view = new Uint8Array(payload);
     worker.postMessage(
       {
         format: "step",
         buffer: view,
         params,
+        requestId,
       },
-      [buffer]
+      [payload]
     );
   });
 }
 
 /**
  * Load a STEP/STP file via OpenCascade WASM in a shared Web Worker.
- * Mesh buffers are transferred as TypedArrays (much faster than JSON).
+ * Mesh buffers are copied then transferred as TypedArrays.
  */
 export async function loadSTEP(
   buffer: ArrayBuffer,
@@ -288,11 +294,40 @@ export async function loadSTEP(
   warmupStepWorker();
   if (workerReady) {
     onProgress?.("Preparing STEP engine…");
-    await workerReady.catch(() => undefined);
+    try {
+      await Promise.race([
+        workerReady,
+        new Promise<void>((_, reject) => {
+          window.setTimeout(
+            () => reject(new Error("STEP engine warmup timed out.")),
+            45_000
+          );
+        }),
+      ]);
+    } catch {
+      // Continue anyway — the load request will initialize OCCT itself.
+      onProgress?.("Starting STEP engine…");
+    }
   }
 
-  const params = stepParamsForImport(buffer.byteLength, quality);
-  const meshes = await parseStepInWorker(buffer, params, onProgress);
+  const mb = buffer.byteLength / (1024 * 1024);
+  let effectiveQuality = quality;
+
+  // Huge STEP files often OOM / hang on Balanced/High in-browser.
+  if (mb >= 80 && quality !== "fast") {
+    effectiveQuality = "fast";
+    onProgress?.(
+      `Large STEP (${Math.round(mb)} MB) — auto-switching to Fast tessellation…`
+    );
+  }
+
+  const params = stepParamsForImport(buffer.byteLength, effectiveQuality);
+  const meshes = await parseStepInWorker(
+    buffer,
+    params,
+    effectiveQuality,
+    onProgress
+  );
 
   if (meshes.length === 0) {
     throw new Error("STEP file contains no tessellated geometry.");
@@ -305,7 +340,7 @@ export async function loadSTEP(
 
   for (let i = 0; i < meshes.length; i += 1) {
     group.add(buildMesh(meshes[i]));
-    if (i > 0 && i % 12 === 0) {
+    if (i > 0 && i % 20 === 0) {
       await yieldToMain();
     }
   }

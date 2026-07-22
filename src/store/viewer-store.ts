@@ -117,7 +117,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   viewDirection: null,
   viewDirectionToken: 0,
   busyMessage: null,
-  importQuality: "balanced",
+  importQuality: "fast",
 
   loadFile: async (file) => {
     await get().loadFiles([file]);
