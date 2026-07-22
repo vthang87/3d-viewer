@@ -19,18 +19,18 @@ export function FilePicker({
   className,
 }: FilePickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const loadFile = useViewerStore((state) => state.loadFile);
+  const loadFiles = useViewerStore((state) => state.loadFiles);
   const status = useViewerStore((state) => state.status);
 
   const onChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
+      const files = Array.from(event.target.files ?? []);
       event.target.value = "";
-      if (file) {
-        await loadFile(file);
+      if (files.length > 0) {
+        await loadFiles(files);
       }
     },
-    [loadFile]
+    [loadFiles]
   );
 
   return (
@@ -39,6 +39,7 @@ export function FilePicker({
         ref={inputRef}
         type="file"
         accept={ACCEPTED_EXTENSIONS.join(",")}
+        multiple
         className="hidden"
         onChange={onChange}
       />

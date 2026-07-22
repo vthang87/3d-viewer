@@ -1,12 +1,16 @@
 import type { Object3D } from "three";
 import { create } from "zustand";
 import { disposeObject } from "@/lib/geometry/dispose";
+import { exportObjectAsSTL } from "@/lib/geometry/export-stl";
+import { computeGeometryStats } from "@/lib/geometry/geometry-info";
 import {
   applyObjectVisibility,
   createDefaultVisibility,
+  extractSceneObjects,
   findObjectById,
 } from "@/lib/geometry/object-tree";
-import { loadModel } from "@/lib/loaders/load-model";
+import { simplifyObject } from "@/lib/geometry/simplify-mesh";
+import { loadModelFromFiles } from "@/lib/loaders/load-model";
 import type {
   Dimensions,
   FileMeta,
@@ -58,7 +62,9 @@ interface ViewerState {
   focusObjectId: string | null;
   viewDirection: ViewDirection | null;
   viewDirectionToken: number;
+  busyMessage: string | null;
   loadFile: (file: File) => Promise<void>;
+  loadFiles: (files: File[]) => Promise<void>;
   clearModel: () => void;
   resetCamera: () => void;
   setRenderMode: (mode: RenderMode) => void;
@@ -73,6 +79,8 @@ interface ViewerState {
   focusObject: (id: string) => void;
   setStandardView: (view: StandardView) => void;
   setViewDirection: (direction: ViewDirection) => void;
+  reduceMesh: (keepRatio: number) => Promise<void>;
+  exportStl: () => void;
 }
 
 function syncVisibility(
@@ -105,13 +113,18 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   focusObjectId: null,
   viewDirection: null,
   viewDirectionToken: 0,
+  busyMessage: null,
 
   loadFile: async (file) => {
+    await get().loadFiles([file]);
+  },
+
+  loadFiles: async (files) => {
     const previous = get().model;
-    set({ status: "loading", error: null });
+    set({ status: "loading", error: null, busyMessage: "Loading model…" });
 
     try {
-      const loaded = await loadModel(file);
+      const loaded = await loadModelFromFiles(files);
       disposeObject(previous);
 
       const objectVisibility = createDefaultVisibility(loaded.objects);
@@ -120,6 +133,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       set({
         status: "ready",
         error: null,
+        busyMessage: null,
         file: loaded.file,
         fileType: loaded.file.type,
         model: loaded.object,
@@ -138,6 +152,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     } catch (error) {
       set({
         status: get().model ? "ready" : "idle",
+        busyMessage: null,
         error:
           error instanceof Error
             ? error.message
@@ -151,6 +166,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     set({
       status: "idle",
       error: null,
+      busyMessage: null,
       file: null,
       fileType: null,
       model: null,
@@ -253,5 +269,69 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   setStandardView: (view) => {
     get().setViewDirection(STANDARD_VIEW_DIRECTIONS[view]);
+  },
+
+  reduceMesh: async (keepRatio) => {
+    const model = get().model;
+    if (!model || get().status === "loading") return;
+
+    set({
+      status: "loading",
+      error: null,
+      busyMessage: "Reducing mesh…",
+    });
+
+    try {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 30);
+      });
+
+      await simplifyObject(model, { ratio: keepRatio });
+
+      const stats = computeGeometryStats(model);
+      const objects = extractSceneObjects(model);
+      const objectVisibility = createDefaultVisibility(objects);
+      syncVisibility(model, objects, objectVisibility);
+
+      set({
+        status: "ready",
+        busyMessage: null,
+        error: null,
+        dimensions: stats.dimensions,
+        triangleCount: stats.triangleCount,
+        meshCount: stats.meshCount,
+        vertexCount: stats.vertexCount,
+        objects,
+        objectVisibility,
+        isolatedObjectId: null,
+        selectedObjectId: null,
+        focusObjectId: null,
+        viewDirection: null,
+        cameraResetToken: get().cameraResetToken + 1,
+      });
+    } catch (error) {
+      set({
+        status: "ready",
+        busyMessage: null,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to reduce this mesh.",
+      });
+    }
+  },
+
+  exportStl: () => {
+    const { model, file } = get();
+    if (!model) return;
+
+    try {
+      exportObjectAsSTL(model, file?.name);
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Unable to export STL.",
+      });
+    }
   },
 }));

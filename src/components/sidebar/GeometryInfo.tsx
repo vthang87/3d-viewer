@@ -10,9 +10,9 @@ export function GeometryInfo() {
   const meshCount = useViewerStore((state) => state.meshCount);
   const triangleCount = useViewerStore((state) => state.triangleCount);
   const vertexCount = useViewerStore((state) => state.vertexCount);
-  const status = useViewerStore((state) => state.status);
+  const model = useViewerStore((state) => state.model);
 
-  if (status !== "ready") {
+  if (!model) {
     return null;
   }
 

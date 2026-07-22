@@ -1,13 +1,14 @@
 # 3D Viewer
 
-Client-side web viewer for **STL**, **3MF**, and **STEP** files. Files are parsed and rendered entirely in the browser — nothing is uploaded to a server.
+Client-side web viewer for **STL**, **3MF**, **STEP**, and **OBJ** files. Files are parsed and rendered entirely in the browser — nothing is uploaded to a server.
 
 **Live:** [https://3d-viewer.vthang.top](https://3d-viewer.vthang.top)
 
 ## Features
 
-- Open `.stl` (ASCII / binary), `.3mf`, and `.step` / `.stp` (drag & drop or file picker, max 200 MB)
+- Open `.stl` (ASCII / binary), `.3mf`, `.step` / `.stp`, and `.obj` (+ optional `.mtl`)
 - STEP/STP tessellated client-side via OpenCascade WASM (`occt-import-js`, LGPL)
+- Reduce mesh (meshoptimizer) and export binary STL from the current model
 - Orbit / pan / zoom with damping; reset / frame selection
 - Auto-center model and fit camera on load
 - CAD-style **View Cube** (faces / edges / corners) with animated camera transitions

@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "3D Viewer — STL / 3MF / STEP",
+  title: "3D Viewer — STL / 3MF / STEP / OBJ",
   description:
-    "Client-side 3D file viewer for STL, 3MF and STEP. Files stay in your browser.",
+    "Client-side 3D file viewer for STL, 3MF, STEP and OBJ. Reduce mesh and export STL in the browser.",
 };
 
 export default function RootLayout({

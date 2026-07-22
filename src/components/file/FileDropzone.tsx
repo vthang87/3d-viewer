@@ -14,31 +14,39 @@ interface FileDropzoneProps {
 }
 
 export function FileDropzone({ className, compact = false }: FileDropzoneProps) {
-  const loadFile = useViewerStore((state) => state.loadFile);
+  const loadFiles = useViewerStore((state) => state.loadFiles);
   const status = useViewerStore((state) => state.status);
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
-      const file = acceptedFiles[0];
-      if (file) {
-        await loadFile(file);
+      if (acceptedFiles.length > 0) {
+        await loadFiles(acceptedFiles);
       }
     },
-    [loadFile]
+    [loadFiles]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     noClick: true,
     noKeyboard: true,
-    multiple: false,
+    multiple: true,
     disabled: status === "loading",
     accept: {
       "model/stl": [".stl"],
+      "model/obj": [".obj"],
+      "text/plain": [".obj", ".mtl"],
       "application/vnd.ms-package.3dmanufacturing-3dmodel+xml": [".3mf"],
       "application/step": [".step", ".stp"],
       "model/step": [".step", ".stp"],
-      "application/octet-stream": [".stl", ".3mf", ".step", ".stp"],
+      "application/octet-stream": [
+        ".stl",
+        ".3mf",
+        ".step",
+        ".stp",
+        ".obj",
+        ".mtl",
+      ],
     },
   });
 
@@ -58,7 +66,7 @@ export function FileDropzone({ className, compact = false }: FileDropzoneProps) 
         {isDragActive ? (
           <div className="flex h-full items-center justify-center">
             <p className="rounded-md bg-background/90 px-4 py-2 text-sm font-medium">
-              Drop STL, 3MF or STEP to open
+              Drop model file to open
             </p>
           </div>
         ) : null}
@@ -87,8 +95,11 @@ export function FileDropzone({ className, compact = false }: FileDropzoneProps) 
         </div>
         <div className="space-y-2">
           <h2 className="text-lg font-semibold tracking-tight">
-            Drop STL, 3MF or STEP file here
+            Drop STL, 3MF, STEP or OBJ here
           </h2>
+          <p className="text-sm text-muted-foreground">
+            Optional: include `.mtl` with OBJ
+          </p>
           <p className="text-sm text-muted-foreground">or</p>
         </div>
         <FilePicker label="Choose File" />

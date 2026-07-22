@@ -1,6 +1,6 @@
 import type { Object3D } from "three";
 
-export type FileType = "stl" | "3mf" | "step";
+export type FileType = "stl" | "3mf" | "step" | "obj";
 
 export type ViewerStatus = "idle" | "loading" | "ready" | "error";
 
@@ -42,6 +42,13 @@ export interface LoadedModel {
 
 export const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 
-export const ACCEPTED_EXTENSIONS = [".stl", ".3mf", ".step", ".stp"] as const;
+export const ACCEPTED_EXTENSIONS = [
+  ".stl",
+  ".3mf",
+  ".step",
+  ".stp",
+  ".obj",
+  ".mtl",
+] as const;
 
 export const DEFAULT_MODEL_COLOR = "#d1d5db";

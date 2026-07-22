@@ -15,7 +15,9 @@ export function DimensionsInfo() {
       ? "STEP units are converted during tessellation. Dimensions are shown in millimeters (model units as interpreted by the importer)."
       : fileType === "3mf"
         ? "3MF may include unit metadata; dimensions are shown in millimeters."
-        : "STL files do not contain unit metadata. Dimensions are interpreted as millimeters.";
+        : fileType === "obj"
+          ? "OBJ has no standard unit metadata. Dimensions are interpreted as millimeters."
+          : "STL files do not contain unit metadata. Dimensions are interpreted as millimeters.";
 
   return (
     <div className="space-y-2 text-sm">

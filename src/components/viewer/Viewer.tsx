@@ -41,6 +41,7 @@ export function Viewer() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const status = useViewerStore((state) => state.status);
   const error = useViewerStore((state) => state.error);
+  const busyMessage = useViewerStore((state) => state.busyMessage);
   const model = useViewerStore((state) => state.model);
 
   useEffect(() => {
@@ -141,9 +142,11 @@ export function Viewer() {
           {status === "loading" ? (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-sm">
               <div className="rounded-lg border border-border bg-panel px-5 py-4 text-center shadow-lg">
-                <p className="text-sm font-medium">Loading model…</p>
+                <p className="text-sm font-medium">
+                  {busyMessage ?? "Working…"}
+                </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Parsing geometry
+                  Processing stays in your browser
                 </p>
               </div>
             </div>

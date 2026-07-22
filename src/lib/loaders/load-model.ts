@@ -1,6 +1,7 @@
 import { centerObject, getBoundingBox } from "@/lib/geometry/bounding-box";
 import { computeGeometryStats } from "@/lib/geometry/geometry-info";
 import { extractSceneObjects } from "@/lib/geometry/object-tree";
+import { loadOBJ } from "@/lib/loaders/obj-loader";
 import { loadSTL } from "@/lib/loaders/stl-loader";
 import { loadSTEP } from "@/lib/loaders/step-loader";
 import { load3MF } from "@/lib/loaders/threemf-loader";
@@ -21,7 +22,12 @@ export function detectFileType(filename: string): FileType | null {
   if (ext === ".stl") return "stl";
   if (ext === ".3mf") return "3mf";
   if (ext === ".step" || ext === ".stp") return "step";
+  if (ext === ".obj") return "obj";
   return null;
+}
+
+function isMtlFile(file: File): boolean {
+  return getExtension(file.name) === ".mtl";
 }
 
 export function validateFile(file: File): void {
@@ -38,23 +44,75 @@ export function validateFile(file: File): void {
   }
 }
 
-export async function loadModel(file: File): Promise<LoadedModel> {
-  validateFile(file);
+function validateFiles(files: File[]): File {
+  if (files.length === 0) {
+    throw new Error("No file selected.");
+  }
 
-  const type = detectFileType(file.name)!;
-  const buffer = await file.arrayBuffer();
+  const modelFiles = files.filter((file) => detectFileType(file.name));
+  const mtlFiles = files.filter(isMtlFile);
+
+  if (modelFiles.length === 0) {
+    throw new Error(
+      `Unsupported file. Supported formats: ${ACCEPTED_EXTENSIONS.join(", ")}`
+    );
+  }
+
+  if (modelFiles.length > 1) {
+    throw new Error("Please open one model file at a time.");
+  }
+
+  const primary = modelFiles[0];
+  validateFile(primary);
+
+  if (mtlFiles.length > 0 && detectFileType(primary.name) !== "obj") {
+    throw new Error("MTL materials can only be used with OBJ files.");
+  }
+
+  return primary;
+}
+
+async function loadObjectForType(
+  type: FileType,
+  buffer: ArrayBuffer,
+  mtlBuffer?: ArrayBuffer | null
+) {
+  switch (type) {
+    case "stl":
+      return loadSTL(buffer);
+    case "3mf":
+      return load3MF(buffer);
+    case "step":
+      return loadSTEP(buffer);
+    case "obj":
+      return loadOBJ(buffer, mtlBuffer);
+    default:
+      throw new Error("Unsupported file type.");
+  }
+}
+
+export async function loadModel(file: File): Promise<LoadedModel> {
+  return loadModelFromFiles([file]);
+}
+
+export async function loadModelFromFiles(files: File[]): Promise<LoadedModel> {
+  const primary = validateFiles(files);
+  const type = detectFileType(primary.name)!;
+  const mtl = files.find(isMtlFile) ?? null;
+
+  const buffer = await primary.arrayBuffer();
+  const mtlBuffer = mtl ? await mtl.arrayBuffer() : null;
 
   let object;
   try {
-    if (type === "stl") {
-      object = await loadSTL(buffer);
-    } else if (type === "3mf") {
-      object = await load3MF(buffer);
-    } else {
-      object = await loadSTEP(buffer);
-    }
+    object = await loadObjectForType(type, buffer, mtlBuffer);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("STEP")) {
+    if (
+      error instanceof Error &&
+      (error.message.includes("STEP") ||
+        error.message.includes("OBJ") ||
+        error.message.includes("MTL"))
+    ) {
       throw error;
     }
     throw new Error(
@@ -78,8 +136,8 @@ export async function loadModel(file: File): Promise<LoadedModel> {
     stats,
     objects,
     file: {
-      name: file.name,
-      size: file.size,
+      name: primary.name,
+      size: primary.size + (mtl?.size ?? 0),
       type,
     },
   };
