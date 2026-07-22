@@ -105,7 +105,10 @@ export function FileDropzone({ className, compact = false }: FileDropzoneProps) 
         <FilePicker label="Choose File" />
         <div className="space-y-1 text-xs text-muted-foreground">
           <p>Supported formats: {ACCEPTED_EXTENSIONS.join(" ").toUpperCase()}</p>
-          <p>Max size 512 MB · files never leave your device.</p>
+          <p>
+            Max size 512 MB (STL/OBJ) · STEP/STP under 100 MB · files stay on
+            your device.
+          </p>
         </div>
       </div>
     </div>

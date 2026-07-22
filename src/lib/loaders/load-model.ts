@@ -12,6 +12,7 @@ import { load3MF } from "@/lib/loaders/threemf-loader";
 import {
   ACCEPTED_EXTENSIONS,
   MAX_FILE_SIZE_BYTES,
+  MAX_STEP_FILE_SIZE_BYTES,
   type FileType,
   type LoadedModel,
 } from "@/types/viewer";
@@ -44,6 +45,12 @@ export function validateFile(file: File): void {
   if (!type) {
     throw new Error(
       `Unsupported file. Supported formats: ${ACCEPTED_EXTENSIONS.join(", ")}`
+    );
+  }
+
+  if (type === "step" && file.size > MAX_STEP_FILE_SIZE_BYTES) {
+    throw new Error(
+      `STEP file too large (${formatMb(file.size)}). Maximum for STEP/STP is ${formatMb(MAX_STEP_FILE_SIZE_BYTES)}. Export binary STL from CAD and open that instead.`
     );
   }
 

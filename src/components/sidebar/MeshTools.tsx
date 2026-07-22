@@ -59,8 +59,8 @@ export function MeshTools() {
           ))}
         </div>
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          For large STEP (~50MB+), choose <strong>Fast</strong> before opening.
-          Binary STL is still the most reliable format for huge models.
+          For STEP over ~50MB choose <strong>Fast</strong>. STEP max{" "}
+          <strong>100 MB</strong> — larger files: export binary STL from CAD.
         </p>
       </div>
 

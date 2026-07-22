@@ -42,6 +42,9 @@ export interface LoadedModel {
 
 export const MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
 
+/** STEP/STP tessellation in-browser is limited; larger files should be exported as STL. */
+export const MAX_STEP_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+
 export const ACCEPTED_EXTENSIONS = [
   ".stl",
   ".3mf",
