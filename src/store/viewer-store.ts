@@ -11,6 +11,7 @@ import {
 } from "@/lib/geometry/object-tree";
 import { simplifyObject } from "@/lib/geometry/simplify-mesh";
 import { loadModelFromFiles } from "@/lib/loaders/load-model";
+import type { ImportQuality } from "@/lib/loaders/step-loader";
 import type {
   Dimensions,
   FileMeta,
@@ -63,11 +64,13 @@ interface ViewerState {
   viewDirection: ViewDirection | null;
   viewDirectionToken: number;
   busyMessage: string | null;
+  importQuality: ImportQuality;
   loadFile: (file: File) => Promise<void>;
   loadFiles: (files: File[]) => Promise<void>;
   clearModel: () => void;
   resetCamera: () => void;
   setRenderMode: (mode: RenderMode) => void;
+  setImportQuality: (quality: ImportQuality) => void;
   toggleGrid: () => void;
   toggleAxes: () => void;
   setGridVisible: (visible: boolean) => void;
@@ -114,6 +117,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   viewDirection: null,
   viewDirectionToken: 0,
   busyMessage: null,
+  importQuality: "balanced",
 
   loadFile: async (file) => {
     await get().loadFiles([file]);
@@ -124,9 +128,13 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     set({ status: "loading", error: null, busyMessage: "Loading model…" });
 
     try {
-      const loaded = await loadModelFromFiles(files, (message) => {
-        set({ busyMessage: message });
-      });
+      const loaded = await loadModelFromFiles(
+        files,
+        (message) => {
+          set({ busyMessage: message });
+        },
+        get().importQuality
+      );
       disposeObject(previous);
 
       const objectVisibility = createDefaultVisibility(loaded.objects);
@@ -194,6 +202,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   },
 
   setRenderMode: (mode) => set({ renderMode: mode }),
+
+  setImportQuality: (quality) => set({ importQuality: quality }),
 
   toggleGrid: () => set({ gridVisible: !get().gridVisible }),
 

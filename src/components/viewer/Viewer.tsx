@@ -23,6 +23,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useViewerStore } from "@/store/viewer-store";
+import { warmupStepWorker } from "@/lib/loaders/step-loader";
 
 const Scene = dynamic(
   () => import("@/components/viewer/Scene").then((mod) => mod.Scene),
@@ -43,6 +44,10 @@ export function Viewer() {
   const error = useViewerStore((state) => state.error);
   const busyMessage = useViewerStore((state) => state.busyMessage);
   const model = useViewerStore((state) => state.model);
+
+  useEffect(() => {
+    warmupStepWorker();
+  }, []);
 
   useEffect(() => {
     const onFullscreenChange = () => {

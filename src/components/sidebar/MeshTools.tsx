@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Download, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { ImportQuality } from "@/lib/loaders/step-loader";
 import { useViewerStore } from "@/store/viewer-store";
 
 const KEEP_PRESETS = [
@@ -12,9 +13,18 @@ const KEEP_PRESETS = [
   { label: "10%", value: 0.1 },
 ] as const;
 
+const QUALITY_PRESETS: { label: string; value: ImportQuality; hint: string }[] =
+  [
+    { label: "Fast", value: "fast", hint: "Fewer triangles, quicker STEP" },
+    { label: "Balanced", value: "balanced", hint: "Default" },
+    { label: "High", value: "high", hint: "More detail, slower" },
+  ];
+
 export function MeshTools() {
   const status = useViewerStore((state) => state.status);
   const triangleCount = useViewerStore((state) => state.triangleCount);
+  const importQuality = useViewerStore((state) => state.importQuality);
+  const setImportQuality = useViewerStore((state) => state.setImportQuality);
   const reduceMesh = useViewerStore((state) => state.reduceMesh);
   const exportStl = useViewerStore((state) => state.exportStl);
   const [keepRatio, setKeepRatio] = useState(0.5);
@@ -28,7 +38,31 @@ export function MeshTools() {
   const disabled = status !== "ready" || busy || triangleCount === 0;
 
   return (
-    <div className="space-y-3 text-sm">
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">
+          Import quality (STEP)
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {QUALITY_PRESETS.map((preset) => (
+            <Button
+              key={preset.value}
+              type="button"
+              size="xs"
+              variant={importQuality === preset.value ? "default" : "outline"}
+              disabled={busy}
+              title={preset.hint}
+              onClick={() => setImportQuality(preset.value)}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          Fast is recommended for large STEP files (~100MB+).
+        </p>
+      </div>
+
       <div>
         <label
           htmlFor="keep-ratio"

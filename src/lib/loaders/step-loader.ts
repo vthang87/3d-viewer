@@ -1,39 +1,72 @@
 import * as THREE from "three";
 import { DEFAULT_MODEL_COLOR } from "@/types/viewer";
 
-export interface OcctMeshAttribute {
-  array: number[];
+export type ImportQuality = "fast" | "balanced" | "high";
+
+export type LoadProgress = (message: string) => void;
+
+export interface StepTessellationParams {
+  linearUnit: "millimeter";
+  linearDeflectionType: "bounding_box_ratio";
+  linearDeflection: number;
+  angularDeflection: number;
 }
 
-export interface OcctBrepFace {
+interface TransferFace {
   first: number;
   last: number;
-  color?: [number, number, number] | null;
+  color: [number, number, number] | null;
 }
 
-export interface OcctMesh {
-  name?: string;
-  color?: [number, number, number] | null;
-  attributes: {
-    position: OcctMeshAttribute;
-    normal?: OcctMeshAttribute;
-  };
-  index: OcctMeshAttribute;
-  brep_faces?: OcctBrepFace[];
-}
-
-export interface OcctImportResult {
-  success?: boolean;
-  meshes?: OcctMesh[];
+interface TransferMesh {
+  name: string;
+  color: [number, number, number] | null;
+  position: Float32Array;
+  normal: Float32Array | null;
+  index: Uint32Array;
+  faces: TransferFace[];
 }
 
 type WorkerResponse =
-  | { ok: true; result: OcctImportResult }
+  | { ok: true; type: "warmup" }
+  | {
+      ok: true;
+      type: "result";
+      success: boolean;
+      meshes: TransferMesh[];
+    }
   | { ok: false; error: string };
 
 const WORKER_URL = "/occt-import-js/step-worker.js";
 
-export type LoadProgress = (message: string) => void;
+let sharedWorker: Worker | null = null;
+let workerReady: Promise<void> | null = null;
+let requestId = 0;
+
+function getSharedWorker(): Worker {
+  if (!sharedWorker) {
+    sharedWorker = new Worker(WORKER_URL);
+  }
+  return sharedWorker;
+}
+
+/** Preload OCCT WASM so the first STEP open feels faster. */
+export function warmupStepWorker(): void {
+  if (typeof window === "undefined") return;
+  if (workerReady) return;
+
+  const worker = getSharedWorker();
+  workerReady = new Promise((resolve) => {
+    const onMessage = (event: MessageEvent<WorkerResponse>) => {
+      if (event.data && event.data.ok && event.data.type === "warmup") {
+        worker.removeEventListener("message", onMessage);
+        resolve();
+      }
+    };
+    worker.addEventListener("message", onMessage);
+    worker.postMessage({ type: "warmup" });
+  });
+}
 
 function colorFromRgb(
   rgb: [number, number, number] | null | undefined,
@@ -54,38 +87,28 @@ function createMaterial(color: THREE.Color): THREE.MeshStandardMaterial {
   });
 }
 
-function buildMesh(geometryMesh: OcctMesh): THREE.Mesh {
+function buildMesh(mesh: TransferMesh): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(geometryMesh.attributes.position.array, 3)
-  );
+  geometry.setAttribute("position", new THREE.BufferAttribute(mesh.position, 3));
 
-  if (geometryMesh.attributes.normal) {
-    geometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(geometryMesh.attributes.normal.array, 3)
-    );
+  if (mesh.normal && mesh.normal.length === mesh.position.length) {
+    geometry.setAttribute("normal", new THREE.BufferAttribute(mesh.normal, 3));
   } else {
     geometry.computeVertexNormals();
   }
 
-  const index = Uint32Array.from(geometryMesh.index.array);
-  geometry.setIndex(new THREE.BufferAttribute(index, 1));
+  geometry.setIndex(new THREE.BufferAttribute(mesh.index, 1));
 
-  const defaultColor = colorFromRgb(
-    geometryMesh.color,
-    new THREE.Color(DEFAULT_MODEL_COLOR)
-  );
+  const defaultColor = colorFromRgb(mesh.color, new THREE.Color(DEFAULT_MODEL_COLOR));
   const materials: THREE.MeshStandardMaterial[] = [createMaterial(defaultColor)];
+  const faces = mesh.faces ?? [];
 
-  const faces = geometryMesh.brep_faces ?? [];
   if (faces.length > 0) {
     for (const face of faces) {
       materials.push(createMaterial(colorFromRgb(face.color, defaultColor)));
     }
 
-    const triangleCount = index.length / 3;
+    const triangleCount = mesh.index.length / 3;
     let triangleIndex = 0;
     let faceColorGroupIndex = 0;
 
@@ -114,49 +137,46 @@ function buildMesh(geometryMesh: OcctMesh): THREE.Mesh {
     }
   }
 
-  const mesh = new THREE.Mesh(
+  const threeMesh = new THREE.Mesh(
     geometry,
     materials.length > 1 ? materials : materials[0]
   );
-  mesh.name = geometryMesh.name?.trim() || "step-part";
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
+  threeMesh.name = mesh.name?.trim() || "step-part";
+  return threeMesh;
 }
 
-/** Coarser tessellation for larger STEP files to keep browser memory in check. */
-export function stepParamsForFileSize(byteLength: number) {
+const QUALITY_BASE: Record<
+  ImportQuality,
+  { linearDeflection: number; angularDeflection: number }
+> = {
+  fast: { linearDeflection: 0.04, angularDeflection: 0.9 },
+  balanced: { linearDeflection: 0.01, angularDeflection: 0.5 },
+  high: { linearDeflection: 0.002, angularDeflection: 0.3 },
+};
+
+/** Tessellation params from quality + file size (larger files go coarser). */
+export function stepParamsForImport(
+  byteLength: number,
+  quality: ImportQuality = "balanced"
+): StepTessellationParams {
   const mb = byteLength / (1024 * 1024);
+  const base = QUALITY_BASE[quality];
+  let scale = 1;
 
-  if (mb >= 120) {
-    return {
-      linearUnit: "millimeter",
-      linearDeflectionType: "bounding_box_ratio",
-      linearDeflection: 0.03,
-      angularDeflection: 0.75,
-    };
-  }
-
-  if (mb >= 40) {
-    return {
-      linearUnit: "millimeter",
-      linearDeflectionType: "bounding_box_ratio",
-      linearDeflection: 0.015,
-      angularDeflection: 0.5,
-    };
-  }
+  if (mb >= 120) scale = quality === "high" ? 2.5 : 3.5;
+  else if (mb >= 40) scale = quality === "high" ? 1.6 : 2.2;
+  else if (mb >= 15) scale = 1.3;
 
   return {
     linearUnit: "millimeter",
     linearDeflectionType: "bounding_box_ratio",
-    linearDeflection: 0.003,
-    angularDeflection: 0.35,
+    linearDeflection: base.linearDeflection * scale,
+    angularDeflection: Math.min(1.2, base.angularDeflection * Math.sqrt(scale)),
   };
 }
 
 function timeoutMsForFileSize(byteLength: number): number {
   const mb = byteLength / (1024 * 1024);
-  // Base 3 min + ~4s per MB, capped at 15 min.
   return Math.min(15 * 60_000, Math.max(180_000, Math.round(180_000 + mb * 4_000)));
 }
 
@@ -168,53 +188,61 @@ function yieldToMain(): Promise<void> {
 
 function parseStepInWorker(
   buffer: ArrayBuffer,
-  params: ReturnType<typeof stepParamsForFileSize>,
+  params: StepTessellationParams,
   onProgress?: LoadProgress
-): Promise<OcctImportResult> {
+): Promise<TransferMesh[]> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(WORKER_URL);
+    const worker = getSharedWorker();
     const timeoutMs = timeoutMsForFileSize(buffer.byteLength);
+    const id = ++requestId;
 
     onProgress?.(
-      `Tessellating STEP (${Math.round(buffer.byteLength / (1024 * 1024))} MB)… this can take several minutes`
+      `Tessellating STEP (${Math.round(buffer.byteLength / (1024 * 1024))} MB)…`
     );
 
     const timeout = window.setTimeout(() => {
-      worker.terminate();
+      cleanup();
+      // Recreate worker after timeout — it may be stuck in WASM.
+      sharedWorker?.terminate();
+      sharedWorker = null;
+      workerReady = null;
       reject(
         new Error(
-          "STEP import timed out. Try reducing the model in CAD software, or export STL/OBJ first."
+          "STEP import timed out. Try Import quality → Fast, or export STL/OBJ from CAD."
         )
       );
     }, timeoutMs);
 
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      window.clearTimeout(timeout);
-      worker.terminate();
-
+    const onMessage = (event: MessageEvent<WorkerResponse>) => {
       const data = event.data;
-      if (!data || typeof data !== "object") {
-        reject(new Error("STEP worker returned an invalid response."));
-        return;
-      }
+      if (!data || typeof data !== "object") return;
+      if (data.ok && data.type === "warmup") return;
+
+      // Ignore late messages from a previous request after recreate.
+      if (id !== requestId) return;
+
+      cleanup();
 
       if (!data.ok) {
         reject(
           new Error(
             data.error.includes("memory") || data.error.includes("Memory")
-              ? "Not enough memory to import this STEP file. Export a lighter STL/OBJ, or simplify in CAD first."
+              ? "Not enough memory to import this STEP file. Use Fast quality or export STL/OBJ."
               : data.error
           )
         );
         return;
       }
 
-      resolve(data.result);
+      if (data.type !== "result") return;
+      resolve(data.meshes);
     };
 
-    worker.onerror = (event) => {
-      window.clearTimeout(timeout);
-      worker.terminate();
+    const onError = (event: ErrorEvent) => {
+      cleanup();
+      sharedWorker?.terminate();
+      sharedWorker = null;
+      workerReady = null;
       reject(
         new Error(
           event.message ||
@@ -223,17 +251,15 @@ function parseStepInWorker(
       );
     };
 
-    worker.onmessageerror = () => {
+    const cleanup = () => {
       window.clearTimeout(timeout);
-      worker.terminate();
-      reject(
-        new Error(
-          "Failed to transfer STEP result. The tessellated mesh is probably too large for the browser."
-        )
-      );
+      worker.removeEventListener("message", onMessage);
+      worker.removeEventListener("error", onError);
     };
 
-    // Transfer ownership of the ArrayBuffer so we don't keep two copies.
+    worker.addEventListener("message", onMessage);
+    worker.addEventListener("error", onError);
+
     const view = new Uint8Array(buffer);
     worker.postMessage(
       {
@@ -247,24 +273,26 @@ function parseStepInWorker(
 }
 
 /**
- * Load a STEP/STP file via OpenCascade WASM (occt-import-js) in a Web Worker.
- * Converts Z-up CAD coordinates to Three.js Y-up.
+ * Load a STEP/STP file via OpenCascade WASM in a shared Web Worker.
+ * Mesh buffers are transferred as TypedArrays (much faster than JSON).
  */
 export async function loadSTEP(
   buffer: ArrayBuffer,
-  onProgress?: LoadProgress
+  onProgress?: LoadProgress,
+  quality: ImportQuality = "balanced"
 ): Promise<THREE.Object3D> {
   if (typeof window === "undefined") {
     throw new Error("STEP loading is only available in the browser.");
   }
 
-  const params = stepParamsForFileSize(buffer.byteLength);
-  const result = await parseStepInWorker(buffer, params, onProgress);
-  const meshes = result.meshes ?? [];
-
-  if (!result.success && meshes.length === 0) {
-    throw new Error("STEP import failed.");
+  warmupStepWorker();
+  if (workerReady) {
+    onProgress?.("Preparing STEP engine…");
+    await workerReady.catch(() => undefined);
   }
+
+  const params = stepParamsForImport(buffer.byteLength, quality);
+  const meshes = await parseStepInWorker(buffer, params, onProgress);
 
   if (meshes.length === 0) {
     throw new Error("STEP file contains no tessellated geometry.");
@@ -277,12 +305,11 @@ export async function loadSTEP(
 
   for (let i = 0; i < meshes.length; i += 1) {
     group.add(buildMesh(meshes[i]));
-    if (i > 0 && i % 8 === 0) {
+    if (i > 0 && i % 12 === 0) {
       await yieldToMain();
     }
   }
 
-  // OpenCascade / STEP are typically Z-up; Three.js scene is Y-up.
   group.rotation.x = -Math.PI / 2;
   group.updateMatrixWorld(true);
 

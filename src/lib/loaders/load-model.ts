@@ -3,7 +3,11 @@ import { computeGeometryStats } from "@/lib/geometry/geometry-info";
 import { extractSceneObjects } from "@/lib/geometry/object-tree";
 import { loadOBJ } from "@/lib/loaders/obj-loader";
 import { loadSTL } from "@/lib/loaders/stl-loader";
-import { loadSTEP, type LoadProgress } from "@/lib/loaders/step-loader";
+import {
+  loadSTEP,
+  type ImportQuality,
+  type LoadProgress,
+} from "@/lib/loaders/step-loader";
 import { load3MF } from "@/lib/loaders/threemf-loader";
 import {
   ACCEPTED_EXTENSIONS,
@@ -92,7 +96,7 @@ function isMemoryError(error: unknown): boolean {
 function wrapLoadError(error: unknown): Error {
   if (isMemoryError(error)) {
     return new Error(
-      "Not enough browser memory for this file. Try a smaller export, reduce mesh in CAD, or use binary STL."
+      "Not enough browser memory for this file. Try Import quality → Fast, or export binary STL."
     );
   }
 
@@ -109,7 +113,8 @@ async function loadObjectForType(
   type: FileType,
   buffer: ArrayBuffer,
   mtlBuffer: ArrayBuffer | null | undefined,
-  onProgress?: LoadProgress
+  onProgress?: LoadProgress,
+  quality: ImportQuality = "balanced"
 ) {
   switch (type) {
     case "stl":
@@ -119,7 +124,7 @@ async function loadObjectForType(
       onProgress?.("Parsing 3MF…");
       return load3MF(buffer);
     case "step":
-      return loadSTEP(buffer, onProgress);
+      return loadSTEP(buffer, onProgress, quality);
     case "obj":
       onProgress?.("Parsing OBJ…");
       return loadOBJ(buffer, mtlBuffer);
@@ -134,15 +139,14 @@ export async function loadModel(file: File): Promise<LoadedModel> {
 
 export async function loadModelFromFiles(
   files: File[],
-  onProgress?: LoadProgress
+  onProgress?: LoadProgress,
+  quality: ImportQuality = "balanced"
 ): Promise<LoadedModel> {
   const primary = validateFiles(files);
   const type = detectFileType(primary.name)!;
   const mtl = files.find(isMtlFile) ?? null;
 
-  onProgress?.(
-    `Reading ${primary.name} (${formatMb(primary.size)})…`
-  );
+  onProgress?.(`Reading ${primary.name} (${formatMb(primary.size)})…`);
 
   let buffer: ArrayBuffer;
   let mtlBuffer: ArrayBuffer | null = null;
@@ -156,7 +160,13 @@ export async function loadModelFromFiles(
 
   let object;
   try {
-    object = await loadObjectForType(type, buffer, mtlBuffer, onProgress);
+    object = await loadObjectForType(
+      type,
+      buffer,
+      mtlBuffer,
+      onProgress,
+      quality
+    );
   } catch (error) {
     throw wrapLoadError(error);
   }
