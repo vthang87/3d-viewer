@@ -40,7 +40,7 @@ export interface LoadedModel {
   objects: SceneObject[];
 }
 
-export const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
+export const MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
 
 export const ACCEPTED_EXTENSIONS = [
   ".stl",

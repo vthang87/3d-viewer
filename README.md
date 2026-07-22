@@ -8,6 +8,7 @@ Client-side web viewer for **STL**, **3MF**, **STEP**, and **OBJ** files. Files 
 
 - Open `.stl` (ASCII / binary), `.3mf`, `.step` / `.stp`, and `.obj` (+ optional `.mtl`)
 - STEP/STP tessellated client-side via OpenCascade WASM (`occt-import-js`, LGPL)
+- Large files up to **512 MB** (STEP uses coarser tessellation automatically)
 - Reduce mesh (meshoptimizer) and export binary STL from the current model
 - Orbit / pan / zoom with damping; reset / frame selection
 - Auto-center model and fit camera on load

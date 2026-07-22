@@ -124,7 +124,9 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     set({ status: "loading", error: null, busyMessage: "Loading model…" });
 
     try {
-      const loaded = await loadModelFromFiles(files);
+      const loaded = await loadModelFromFiles(files, (message) => {
+        set({ busyMessage: message });
+      });
       disposeObject(previous);
 
       const objectVisibility = createDefaultVisibility(loaded.objects);

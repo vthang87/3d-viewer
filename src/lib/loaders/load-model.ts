@@ -3,7 +3,7 @@ import { computeGeometryStats } from "@/lib/geometry/geometry-info";
 import { extractSceneObjects } from "@/lib/geometry/object-tree";
 import { loadOBJ } from "@/lib/loaders/obj-loader";
 import { loadSTL } from "@/lib/loaders/stl-loader";
-import { loadSTEP } from "@/lib/loaders/step-loader";
+import { loadSTEP, type LoadProgress } from "@/lib/loaders/step-loader";
 import { load3MF } from "@/lib/loaders/threemf-loader";
 import {
   ACCEPTED_EXTENSIONS,
@@ -30,6 +30,10 @@ function isMtlFile(file: File): boolean {
   return getExtension(file.name) === ".mtl";
 }
 
+function formatMb(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
 export function validateFile(file: File): void {
   const type = detectFileType(file.name);
 
@@ -40,7 +44,9 @@ export function validateFile(file: File): void {
   }
 
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    throw new Error("File too large. Maximum size is 200 MB.");
+    throw new Error(
+      `File too large (${formatMb(file.size)}). Maximum size is ${formatMb(MAX_FILE_SIZE_BYTES)}.`
+    );
   }
 }
 
@@ -72,19 +78,50 @@ function validateFiles(files: File[]): File {
   return primary;
 }
 
+function isMemoryError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("memory") ||
+    message.includes("allocation") ||
+    message.includes("out of heap") ||
+    error.name === "RangeError"
+  );
+}
+
+function wrapLoadError(error: unknown): Error {
+  if (isMemoryError(error)) {
+    return new Error(
+      "Not enough browser memory for this file. Try a smaller export, reduce mesh in CAD, or use binary STL."
+    );
+  }
+
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error(
+    "Unable to load this file. The model may be corrupted or unsupported."
+  );
+}
+
 async function loadObjectForType(
   type: FileType,
   buffer: ArrayBuffer,
-  mtlBuffer?: ArrayBuffer | null
+  mtlBuffer: ArrayBuffer | null | undefined,
+  onProgress?: LoadProgress
 ) {
   switch (type) {
     case "stl":
+      onProgress?.("Parsing STL…");
       return loadSTL(buffer);
     case "3mf":
+      onProgress?.("Parsing 3MF…");
       return load3MF(buffer);
     case "step":
-      return loadSTEP(buffer);
+      return loadSTEP(buffer, onProgress);
     case "obj":
+      onProgress?.("Parsing OBJ…");
       return loadOBJ(buffer, mtlBuffer);
     default:
       throw new Error("Unsupported file type.");
@@ -95,30 +132,36 @@ export async function loadModel(file: File): Promise<LoadedModel> {
   return loadModelFromFiles([file]);
 }
 
-export async function loadModelFromFiles(files: File[]): Promise<LoadedModel> {
+export async function loadModelFromFiles(
+  files: File[],
+  onProgress?: LoadProgress
+): Promise<LoadedModel> {
   const primary = validateFiles(files);
   const type = detectFileType(primary.name)!;
   const mtl = files.find(isMtlFile) ?? null;
 
-  const buffer = await primary.arrayBuffer();
-  const mtlBuffer = mtl ? await mtl.arrayBuffer() : null;
+  onProgress?.(
+    `Reading ${primary.name} (${formatMb(primary.size)})…`
+  );
+
+  let buffer: ArrayBuffer;
+  let mtlBuffer: ArrayBuffer | null = null;
+
+  try {
+    buffer = await primary.arrayBuffer();
+    mtlBuffer = mtl ? await mtl.arrayBuffer() : null;
+  } catch (error) {
+    throw wrapLoadError(error);
+  }
 
   let object;
   try {
-    object = await loadObjectForType(type, buffer, mtlBuffer);
+    object = await loadObjectForType(type, buffer, mtlBuffer, onProgress);
   } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message.includes("STEP") ||
-        error.message.includes("OBJ") ||
-        error.message.includes("MTL"))
-    ) {
-      throw error;
-    }
-    throw new Error(
-      "Unable to load this file. The model may be corrupted or unsupported."
-    );
+    throw wrapLoadError(error);
   }
+
+  onProgress?.("Computing bounds…");
 
   const box = getBoundingBox(object);
   if (box.isEmpty()) {
